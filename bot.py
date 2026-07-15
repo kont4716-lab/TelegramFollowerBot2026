@@ -31,98 +31,240 @@ app = Flask(__name__)
 telegram_app = Application.builder().token(TOKEN).build()
 
 
-# تخزين الصور مؤقتاً
-saved_photos = []
+# ==========================
+# قاعدة بيانات مؤقتة
+# ==========================
 
+users = {}
+
+
+# ==========================
+# تسجيل المستخدم
+# ==========================
+
+def create_user(user_id, username):
+
+    if user_id not in users:
+        users[user_id] = {
+            "username": username or "Unknown",
+            "facebook": None,
+            "points": 0
+        }
+
+
+# ==========================
+# start
+# ==========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+
+    create_user(
+        user.id,
+        user.username
+    )
+
     await update.message.reply_text(
-        "👋 مرحباً بك في البوت!\n\n"
-        "📸 أرسل صورة لحفظها.\n"
-        "📂 استخدم /extract لإرسال الصور المحفوظة.\n\n"
-        "اكتب /help لرؤية الأوامر."
+        "👋 أهلاً بك في نظام تبادل الحسابات\n\n"
+        "الأوامر:\n\n"
+        "/addfacebook - إضافة حسابك\n"
+        "/profile - حسابي\n"
+        "/accounts - الحسابات\n"
+        "/top - المتصدرون"
     )
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🛠️ الأوامر:\n\n"
-        "/start - بدء البوت\n"
-        "/help - المساعدة\n"
-        "/info - معلومات البوت\n"
-        "/extract - استخراج الصور المحفوظة"
-    )
+# ==========================
+# إضافة فيسبوك
+# ==========================
 
+async def add_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"ℹ️ البوت يعمل بنجاح 🚀\n\n"
-        f"📸 عدد الصور المحفوظة: {len(saved_photos)}"
-    )
+    user_id = update.effective_user.id
 
+    create_user(user_id, update.effective_user.username)
 
-async def save_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    photo = update.message.photo[-1]
-
-    saved_photos.append(photo.file_id)
 
     await update.message.reply_text(
-        f"✅ تم حفظ الصورة\n\n"
-        f"📸 عدد الصور المحفوظة: {len(saved_photos)}"
+        "📘 أرسل الآن رابط حساب فيسبوك الخاص بك:"
     )
 
+    context.user_data["waiting_facebook"] = True
 
-async def extract_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not saved_photos:
+
+# ==========================
+# استقبال الرابط
+# ==========================
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    if context.user_data.get("waiting_facebook"):
+
+        link = update.message.text
+
+        users[user_id]["facebook"] = link
+
+        context.user_data["waiting_facebook"] = False
+
+
         await update.message.reply_text(
-            "❌ لا توجد صور محفوظة"
+            "✅ تم حفظ حسابك\n"
+            "يمكنك الآن جمع النقاط."
+        )
+
+        return
+
+
+
+    await update.message.reply_text(
+        "استخدم /help لرؤية الأوامر"
+    )
+
+
+
+# ==========================
+# الملف الشخصي
+# ==========================
+
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    create_user(user_id, update.effective_user.username)
+
+
+    data = users[user_id]
+
+
+    await update.message.reply_text(
+        f"👤 حسابك\n\n"
+        f"📘 الرابط:\n{data['facebook']}\n\n"
+        f"⭐ النقاط: {data['points']}"
+    )
+
+
+
+# ==========================
+# عرض الحسابات
+# ==========================
+
+async def accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not users:
+        await update.message.reply_text(
+            "لا توجد حسابات بعد"
         )
         return
 
-    await update.message.reply_text(
-        f"📸 عدد الصور المحفوظة: {len(saved_photos)}\n"
-        "⏳ جاري إرسال الصور..."
+
+    text = "📘 الحسابات:\n\n"
+
+
+    for user_id, data in users.items():
+
+        if data["facebook"]:
+
+            text += (
+                f"👤 {data['username']}\n"
+                f"⭐ {data['points']} نقطة\n"
+                f"{data['facebook']}\n\n"
+            )
+
+
+    await update.message.reply_text(text)
+
+
+
+# ==========================
+# ترتيب النقاط
+# ==========================
+
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    ranking = sorted(
+        users.values(),
+        key=lambda x: x["points"],
+        reverse=True
     )
 
-    for photo_id in saved_photos:
-        await update.message.reply_photo(
-            photo=photo_id
+
+    text = "🏆 المتصدرون:\n\n"
+
+
+    for i, user in enumerate(ranking[:10], 1):
+
+        text += (
+            f"{i} - {user['username']}\n"
+            f"⭐ {user['points']} نقطة\n\n"
         )
 
 
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.message and update.message.text:
-        await update.message.reply_text(
-            "📨 " + update.message.text
-        )
+    await update.message.reply_text(text)
 
 
+
+# ==========================
+# معلومات
+# ==========================
+
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+        f"🤖 البوت يعمل\n"
+        f"👥 المستخدمون: {len(users)}"
+    )
+
+
+
+# ==========================
 # تسجيل الأوامر
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CommandHandler("help", help_command))
-telegram_app.add_handler(CommandHandler("info", info))
-telegram_app.add_handler(CommandHandler("extract", extract_photos))
+# ==========================
 
-
-# استقبال الصور
 telegram_app.add_handler(
-    MessageHandler(filters.PHOTO, save_photo)
+    CommandHandler("start", start)
+)
+
+telegram_app.add_handler(
+    CommandHandler("addfacebook", add_facebook)
+)
+
+telegram_app.add_handler(
+    CommandHandler("profile", profile)
+)
+
+telegram_app.add_handler(
+    CommandHandler("accounts", accounts)
+)
+
+telegram_app.add_handler(
+    CommandHandler("top", top)
+)
+
+telegram_app.add_handler(
+    CommandHandler("info", info)
 )
 
 
-# استقبال النصوص
 telegram_app.add_handler(
-    MessageHandler(filters.TEXT & ~filters.COMMAND, echo)
+    MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        text_handler
+    )
 )
 
 
+
+# ==========================
+# Webhook
+# ==========================
 
 @app.route("/")
 def home():
-    return "Telegram Bot is running!"
+    return "Telegram Bot Running"
 
 
 
@@ -134,10 +276,14 @@ def webhook():
         telegram_app.bot
     )
 
-    async def process_update():
+
+    async def process():
+
         await telegram_app.process_update(update)
 
-    asyncio.run(process_update())
+
+    asyncio.run(process())
+
 
     return "OK"
 
@@ -163,5 +309,5 @@ if __name__ == "__main__":
 
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000))
-)
+        port=int(os.environ.get("PORT",10000))
+               )
