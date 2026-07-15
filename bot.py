@@ -1,52 +1,41 @@
 import os
-from flask import Flask, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+import nest_asyncio
+nest_asyncio.apply()
 
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import asyncio
+import logging
+
+# التوكن من المتغيرات البيئية (مهم للأمان)
 TOKEN = os.getenv("TOKEN")
 
-app = Flask(__name__)
-telegram_app = Application.builder().token(TOKEN).build()
+if not TOKEN:
+    raise ValueError("TOKEN غير موجود! أضفه في Render Environment Variables.")
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أهلاً بك! 👋")
+    await update.message.reply_text("👋 مرحباً بك في البوت!\nأرسل /help لرؤية الأوامر.")
 
-async def greetings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.lower()
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🛠️ الأوامر:\n/start - بدء البوت\n/help - مساعدة\n/info - معلومات")
 
-    if any(word in text for word in [
-        "مرحبا",
-        "السلام عليكم",
-        "السلام",
-        "سلام",
-        "hello",
-        "hi"
-    ]):
-        await update.message.reply_text("وعليكم السلام ورحمة الله وبركاته 🌹")
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("ℹ️ البوت يعمل بنجاح على Render")
 
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, greetings))
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📨 " + update.message.text)
 
-@app.route("/")
-def home():
-    return "Bot is running!"
+async def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("info", info))
+    app.add_handler(MessageHandler(filters.TEXT, echo))
+    
+    print("🤖 البوت يعمل بنجاح...")
+    await app.run_polling()
 
-@app.route(f"/{TOKEN}", methods=["POST"])
-async def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    await telegram_app.process_update(update)
-    return "OK"
-
-if __name__ == "__main__":
-    import asyncio
-
-    async def main():
-        await telegram_app.initialize()
-        await telegram_app.bot.set_webhook(
-            url=f"https://telegramfollowerbot2026-1.onrender.com/{TOKEN}"
-        )
-
+if __name__ == '__main__':
     asyncio.run(main())
-
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
