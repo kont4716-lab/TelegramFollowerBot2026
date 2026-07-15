@@ -17,7 +17,7 @@ TOKEN = os.getenv("TOKEN")
 if not TOKEN:
     raise ValueError("TOKEN غير موجود في Environment Variables")
 
-WEBHOOK_URL = "https://telegramfollowerbot2026.onrender.com"
+WEBHOOK_URL = "https://telegramfollowerbot2026-1.onrender.com"
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -79,15 +79,15 @@ def webhook():
         telegram_app.bot
     )
 
-    asyncio.create_task(
-        telegram_app.process_update(update)
-    )
+    async def process_update():
+        await telegram_app.process_update(update)
+
+    asyncio.run(process_update())
 
     return "OK"
 
 
 async def setup_bot():
-
     await telegram_app.initialize()
 
     await telegram_app.bot.set_webhook(
@@ -106,4 +106,4 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 10000))
-              )
+    )
