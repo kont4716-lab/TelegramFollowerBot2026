@@ -1,9 +1,17 @@
 import os
 import asyncio
 import logging
+import sqlite3
 
 from flask import Flask, request
-from telegram import Update
+
+from telegram import (
+    Update,
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -12,12 +20,23 @@ from telegram.ext import (
     filters
 )
 
+
+# ==========================
+# الإعدادات
+# ==========================
+
 TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
     raise ValueError("TOKEN غير موجود في Environment Variables")
 
+
 WEBHOOK_URL = "https://telegramfollowerbot2026-1.onrender.com"
+
+
+DEVELOPER_FACEBOOK = (
+    "https://www.facebook.com/profile.php?id=61587991323622"
+)
 
 
 logging.basicConfig(
@@ -26,94 +45,249 @@ logging.basicConfig(
 )
 
 
+
 app = Flask(__name__)
 
-telegram_app = Application.builder().token(TOKEN).build()
+
+telegram_app = (
+    Application
+    .builder()
+    .token(TOKEN)
+    .build()
+)
+
 
 
 # ==========================
-# قاعدة بيانات مؤقتة
+# قاعدة البيانات SQLite
 # ==========================
 
-users = {}
+db = sqlite3.connect(
+    "users.db",
+    check_same_thread=False
+)
+
+cursor = db.cursor()
+
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users(
+
+    id INTEGER PRIMARY KEY,
+
+    username TEXT,
+
+    facebook TEXT,
+
+    points INTEGER DEFAULT 0
+
+)
+""")
+
+
+db.commit()
+
 
 
 # ==========================
-# تسجيل المستخدم
+# إنشاء مستخدم
 # ==========================
 
 def create_user(user_id, username):
 
-    if user_id not in users:
-        users[user_id] = {
-            "username": username or "Unknown",
-            "facebook": None,
-            "points": 0
-        }
+    cursor.execute(
+        "SELECT id FROM users WHERE id=?",
+        (user_id,)
+    )
+
+    result = cursor.fetchone()
+
+
+    if not result:
+
+        cursor.execute(
+            """
+            INSERT INTO users
+            (id, username, facebook, points)
+
+            VALUES(?,?,?,?)
+            """,
+
+            (
+                user_id,
+                username or "Unknown",
+                "",
+                0
+            )
+        )
+
+        db.commit()
+
 
 
 # ==========================
-# start
+# قائمة الأوامر
 # ==========================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_commands():
+
+    commands = [
+
+        BotCommand(
+            "start",
+            "تشغيل البوت"
+        ),
+
+        BotCommand(
+            "addfacebook",
+            "إضافة حساب فيسبوك"
+        ),
+
+        BotCommand(
+            "profile",
+            "حسابي"
+        ),
+
+        BotCommand(
+            "accounts",
+            "الحسابات"
+        ),
+
+        BotCommand(
+            "top",
+            "المتصدرون"
+        ),
+
+        BotCommand(
+            "info",
+            "معلومات البوت"
+        )
+
+    ]
+
+
+    await telegram_app.bot.set_my_commands(commands)
+
+
+
+
+# ==========================
+# START
+# ==========================
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     user = update.effective_user
+
 
     create_user(
         user.id,
         user.username
     )
 
+
+    keyboard = [
+
+        [
+            InlineKeyboardButton(
+                "👨‍💻 حساب المطور",
+                url=DEVELOPER_FACEBOOK
+            )
+        ]
+
+    ]
+
+
     await update.message.reply_text(
+
         "👋 أهلاً بك في نظام تبادل الحسابات\n\n"
-        "الأوامر:\n\n"
-        "/addfacebook - إضافة حسابك\n"
-        "/profile - حسابي\n"
-        "/accounts - الحسابات\n"
-        "/top - المتصدرون"
+
+        "اختر أمر من القائمة أو اكتب / لرؤية الأوامر\n\n"
+
+        "📘 يمكنك إضافة حسابك باستعمال:\n"
+        "/addfacebook",
+
+        reply_markup=
+        InlineKeyboardMarkup(keyboard)
+
     )
 
 
+
 # ==========================
-# إضافة فيسبوك
+# إضافة حساب فيسبوك
 # ==========================
 
-async def add_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_facebook(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    user_id = update.effective_user.id
+    user = update.effective_user
 
-    create_user(user_id, update.effective_user.username)
+
+    create_user(
+        user.id,
+        user.username
+    )
+
+
+    context.user_data[
+        "waiting_facebook"
+    ] = True
+
 
 
     await update.message.reply_text(
+
         "📘 أرسل الآن رابط حساب فيسبوك الخاص بك:"
-    )
-
-    context.user_data["waiting_facebook"] = True
-
-
-
-# ==========================
-# استقبال الرابط
+      
+    # ==========================
+# استقبال رابط فيسبوك
 # ==========================
 
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def text_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     user_id = update.effective_user.id
+
 
     if context.user_data.get("waiting_facebook"):
 
         link = update.message.text
 
-        users[user_id]["facebook"] = link
 
-        context.user_data["waiting_facebook"] = False
+        cursor.execute(
+            """
+            UPDATE users
+            SET facebook=?
+            WHERE id=?
+            """,
+
+            (
+                link,
+                user_id
+            )
+        )
+
+
+        db.commit()
+
+
+        context.user_data[
+            "waiting_facebook"
+        ] = False
+
 
 
         await update.message.reply_text(
-            "✅ تم حفظ حسابك\n"
-            "يمكنك الآن جمع النقاط."
+            "✅ تم حفظ حسابك بنجاح\n"
+            "يمكنك الآن استخدام البوت."
         )
 
         return
@@ -121,8 +295,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     await update.message.reply_text(
-        "استخدم /help لرؤية الأوامر"
+        "استخدم / لرؤية الأوامر"
     )
+
 
 
 
@@ -130,21 +305,46 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # الملف الشخصي
 # ==========================
 
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def profile(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     user_id = update.effective_user.id
 
-    create_user(user_id, update.effective_user.username)
+
+    create_user(
+        user_id,
+        update.effective_user.username
+    )
 
 
-    data = users[user_id]
+    cursor.execute(
+        """
+        SELECT username, facebook, points
+        FROM users
+        WHERE id=?
+        """,
+
+        (user_id,)
+    )
+
+
+    data = cursor.fetchone()
+
 
 
     await update.message.reply_text(
-        f"👤 حسابك\n\n"
-        f"📘 الرابط:\n{data['facebook']}\n\n"
-        f"⭐ النقاط: {data['points']}"
+
+        "👤 حسابك\n\n"
+
+        f"📘 فيسبوك:\n{data[1] or 'غير مضاف'}\n\n"
+
+        f"⭐ النقاط: {data[2]}"
+
     )
+
+
 
 
 
@@ -152,71 +352,126 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # عرض الحسابات
 # ==========================
 
-async def accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def accounts(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    if not users:
+    cursor.execute(
+        """
+        SELECT username, facebook, points
+        FROM users
+        WHERE facebook != ''
+        """
+    )
+
+
+    rows = cursor.fetchall()
+
+
+
+    if not rows:
+
         await update.message.reply_text(
-            "لا توجد حسابات بعد"
+            "لا توجد حسابات مضافة حاليا"
         )
+
         return
+
 
 
     text = "📘 الحسابات:\n\n"
 
 
-    for user_id, data in users.items():
+    for row in rows:
 
-        if data["facebook"]:
+        text += (
 
-            text += (
-                f"👤 {data['username']}\n"
-                f"⭐ {data['points']} نقطة\n"
-                f"{data['facebook']}\n\n"
-            )
+            f"👤 {row[0]}\n"
+
+            f"⭐ {row[2]} نقطة\n"
+
+            f"{row[1]}\n\n"
+
+        )
+
 
 
     await update.message.reply_text(text)
 
 
 
+
+
 # ==========================
-# ترتيب النقاط
+# المتصدرون
 # ==========================
 
-async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def top(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    ranking = sorted(
-        users.values(),
-        key=lambda x: x["points"],
-        reverse=True
+    cursor.execute(
+        """
+        SELECT username, points
+        FROM users
+        ORDER BY points DESC
+        LIMIT 10
+        """
     )
+
+
+    rows = cursor.fetchall()
 
 
     text = "🏆 المتصدرون:\n\n"
 
 
-    for i, user in enumerate(ranking[:10], 1):
+
+    for index, row in enumerate(rows, 1):
 
         text += (
-            f"{i} - {user['username']}\n"
-            f"⭐ {user['points']} نقطة\n\n"
+
+            f"{index}- {row[0]}\n"
+
+            f"⭐ {row[1]} نقطة\n\n"
+
         )
+
 
 
     await update.message.reply_text(text)
 
 
 
+
+
 # ==========================
-# معلومات
+# معلومات البوت
 # ==========================
 
-async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def info(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM users"
+    )
+
+    count = cursor.fetchone()[0]
+
 
     await update.message.reply_text(
-        f"🤖 البوت يعمل\n"
-        f"👥 المستخدمون: {len(users)}"
+
+        "🤖 البوت يعمل\n\n"
+
+        f"👥 عدد المستخدمين: {count}"
+
     )
+
+
 
 
 
@@ -225,28 +480,52 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================
 
 telegram_app.add_handler(
-    CommandHandler("start", start)
+    CommandHandler(
+        "start",
+        start
+    )
 )
 
-telegram_app.add_handler(
-    CommandHandler("addfacebook", add_facebook)
-)
 
 telegram_app.add_handler(
-    CommandHandler("profile", profile)
+    CommandHandler(
+        "addfacebook",
+        add_facebook
+    )
 )
 
-telegram_app.add_handler(
-    CommandHandler("accounts", accounts)
-)
 
 telegram_app.add_handler(
-    CommandHandler("top", top)
+    CommandHandler(
+        "profile",
+        profile
+    )
 )
 
+
 telegram_app.add_handler(
-    CommandHandler("info", info)
+    CommandHandler(
+        "accounts",
+        accounts
+    )
 )
+
+
+telegram_app.add_handler(
+    CommandHandler(
+        "top",
+        top
+    )
+)
+
+
+telegram_app.add_handler(
+    CommandHandler(
+        "info",
+        info
+    )
+)
+
 
 
 telegram_app.add_handler(
@@ -258,17 +537,25 @@ telegram_app.add_handler(
 
 
 
+
+
 # ==========================
 # Webhook
 # ==========================
 
 @app.route("/")
 def home():
+
     return "Telegram Bot Running"
 
 
 
-@app.route(f"/{TOKEN}", methods=["POST"])
+
+@app.route(
+    f"/{TOKEN}",
+    methods=["POST"]
+)
+
 def webhook():
 
     update = Update.de_json(
@@ -277,37 +564,66 @@ def webhook():
     )
 
 
-    async def process():
-
-        await telegram_app.process_update(update)
-
-
-    asyncio.run(process())
+    asyncio.run(
+        telegram_app.process_update(update)
+    )
 
 
     return "OK"
 
 
 
+
+
+# ==========================
+# تشغيل البوت
+# ==========================
+
 async def setup_bot():
 
     await telegram_app.initialize()
 
+
+    await set_commands()
+
+
+
     await telegram_app.bot.set_webhook(
+
         f"{WEBHOOK_URL}/{TOKEN}"
+
     )
+
 
     await telegram_app.start()
 
-    print("🤖 Bot started successfully")
+
+
+    print(
+        "🤖 Bot started successfully"
+    )
+
+
 
 
 
 if __name__ == "__main__":
 
-    asyncio.run(setup_bot())
+
+    asyncio.run(
+        setup_bot()
+    )
+
 
     app.run(
+
         host="0.0.0.0",
-        port=int(os.environ.get("PORT",10000))
-               )
+
+        port=int(
+            os.environ.get(
+                "PORT",
+                10000
+            )
+        )
+
+))
