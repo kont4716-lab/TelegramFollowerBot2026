@@ -31,15 +31,16 @@ app = Flask(__name__)
 telegram_app = Application.builder().token(TOKEN).build()
 
 
-# تخزين الصور
+# تخزين الصور مؤقتاً
 saved_photos = []
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 مرحباً بك في البوت!\n\n"
-        "أرسل صورة لحفظها 📸\n"
-        "استخدم /استخراج لإرجاع الصور المحفوظة."
+        "📸 أرسل صورة لحفظها.\n"
+        "📂 استخدم /extract لإرسال الصور المحفوظة.\n\n"
+        "اكتب /help لرؤية الأوامر."
     )
 
 
@@ -49,13 +50,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - بدء البوت\n"
         "/help - المساعدة\n"
         "/info - معلومات البوت\n"
-        "/استخراج - استخراج الصور المحفوظة"
+        "/extract - استخراج الصور المحفوظة"
     )
 
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"ℹ️ البوت يعمل بنجاح 🚀\n"
+        f"ℹ️ البوت يعمل بنجاح 🚀\n\n"
         f"📸 عدد الصور المحفوظة: {len(saved_photos)}"
     )
 
@@ -74,18 +75,16 @@ async def save_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def extract_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if len(saved_photos) == 0:
+    if not saved_photos:
         await update.message.reply_text(
             "❌ لا توجد صور محفوظة"
         )
         return
 
-
     await update.message.reply_text(
         f"📸 عدد الصور المحفوظة: {len(saved_photos)}\n"
-        "⏳ جاري الإرسال..."
+        "⏳ جاري إرسال الصور..."
     )
-
 
     for photo_id in saved_photos:
         await update.message.reply_photo(
@@ -96,26 +95,25 @@ async def extract_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message and update.message.text:
-
         await update.message.reply_text(
             "📨 " + update.message.text
         )
 
 
-# الأوامر
+# تسجيل الأوامر
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("help", help_command))
 telegram_app.add_handler(CommandHandler("info", info))
-telegram_app.add_handler(CommandHandler("استخراج", extract_photos))
+telegram_app.add_handler(CommandHandler("extract", extract_photos))
 
 
-# الصور
+# استقبال الصور
 telegram_app.add_handler(
     MessageHandler(filters.PHOTO, save_photo)
 )
 
 
-# النصوص
+# استقبال النصوص
 telegram_app.add_handler(
     MessageHandler(filters.TEXT & ~filters.COMMAND, echo)
 )
@@ -136,10 +134,8 @@ def webhook():
         telegram_app.bot
     )
 
-
     async def process_update():
         await telegram_app.process_update(update)
-
 
     asyncio.run(process_update())
 
@@ -165,8 +161,7 @@ if __name__ == "__main__":
 
     asyncio.run(setup_bot())
 
-
     app.run(
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 10000))
-    )
+)
