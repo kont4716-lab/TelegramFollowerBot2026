@@ -1,629 +1,164 @@
+import telebot
+from telebot import types
+import json
 import os
-import asyncio
-import logging
-import sqlite3
+from datetime import datetime
 
-from flask import Flask, request
+# Replace with your bot token
+TOKEN = "YOUR_BOT_TOKEN_HERE"
+bot = telebot.TeleBot(TOKEN)
 
-from telegram import (
-    Update,
-    BotCommand,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
+DATA_FILE = "users_data.json"
 
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+# Load data from JSON file
+def load_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
 
+# Save data to JSON file
+def save_data(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ==========================
-# الإعدادات
-# ==========================
+users_data = load_data()
 
-TOKEN = os.getenv("TOKEN")
+# Developer Facebook profile
+DEV_PROFILE = "https://www.facebook.com/profile.php?id=61587991323622"
 
-if not TOKEN:
-    raise ValueError("TOKEN غير موجود في Environment Variables")
-
-
-WEBHOOK_URL = "https://telegramfollowerbot2026-1.onrender.com"
-
-
-DEVELOPER_FACEBOOK = (
-    "https://www.facebook.com/profile.php?id=61587991323622"
-)
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-
-
-
-app = Flask(__name__)
-
-
-telegram_app = (
-    Application
-    .builder()
-    .token(TOKEN)
-    .build()
-)
-
-
-
-# ==========================
-# قاعدة البيانات SQLite
-# ==========================
-
-db = sqlite3.connect(
-    "users.db",
-    check_same_thread=False
-)
-
-cursor = db.cursor()
-
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users(
-
-    id INTEGER PRIMARY KEY,
-
-    username TEXT,
-
-    facebook TEXT,
-
-    points INTEGER DEFAULT 0
-
-)
-""")
-
-
-db.commit()
-
-
-
-# ==========================
-# إنشاء مستخدم
-# ==========================
-
-def create_user(user_id, username):
-
-    cursor.execute(
-        "SELECT id FROM users WHERE id=?",
-        (user_id,)
+# Start command - French welcome
+@bot.message_handler(commands=['start'])
+def start(message):
+    user_id = str(message.chat.id)
+    if user_id not in users_data:
+        users_data[user_id] = {
+            "fb_link": None,
+            "points": 0,
+            "followed_dev": False
+        }
+        save_data(users_data)
+    
+    markup = types.InlineKeyboardMarkup()
+    continue_btn = types.InlineKeyboardButton("Continue", callback_data="continue")
+    markup.add(continue_btn)
+    
+    welcome_text = (
+        "Bienvenue dans le bot de support des comptes Facebook !\n\n"
+        "Pour commencer, veuillez fournir le lien de votre compte Facebook."
     )
-
-    result = cursor.fetchone()
-
-
-    if not result:
-
-        cursor.execute(
-            """
-            INSERT INTO users
-            (id, username, facebook, points)
-
-            VALUES(?,?,?,?)
-            """,
-
-            (
-                user_id,
-                username or "Unknown",
-                "",
-                0
-            )
-        )
-
-        db.commit()
-
-
-
-# ==========================
-# قائمة الأوامر
-# ==========================
-
-async def set_commands():
-
-    commands = [
-
-        BotCommand(
-            "start",
-            "تشغيل البوت"
-        ),
-
-        BotCommand(
-            "addfacebook",
-            "إضافة حساب فيسبوك"
-        ),
-
-        BotCommand(
-            "profile",
-            "حسابي"
-        ),
-
-        BotCommand(
-            "accounts",
-            "الحسابات"
-        ),
-
-        BotCommand(
-            "top",
-            "المتصدرون"
-        ),
-
-        BotCommand(
-            "info",
-            "معلومات البوت"
-        )
-
-    ]
-
-
-    await telegram_app.bot.set_my_commands(commands)
-
-
-
-
-# ==========================
-# START
-# ==========================
-
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user = update.effective_user
-
-
-    create_user(
-        user.id,
-        user.username
-    )
-
-
-    keyboard = [
-
-        [
-            InlineKeyboardButton(
-                "👨‍💻 حساب المطور",
-                url=DEVELOPER_FACEBOOK
-            )
-        ]
-
-    ]
-
-
-    await update.message.reply_text(
-
-        "👋 أهلاً بك في نظام تبادل الحسابات\n\n"
-
-        "اختر أمر من القائمة أو اكتب / لرؤية الأوامر\n\n"
-
-        "📘 يمكنك إضافة حسابك باستعمال:\n"
-        "/addfacebook",
-
-        reply_markup=
-        InlineKeyboardMarkup(keyboard)
-
-    )
-
-
-
-# ==========================
-# إضافة حساب فيسبوك
-# ==========================
-
-async def add_facebook(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user = update.effective_user
-
-
-    create_user(
-        user.id,
-        user.username
-    )
-
-
-    context.user_data[
-        "waiting_facebook"
-    ] = True
-
-
-
-    await update.message.reply_text(
-
-        "📘 أرسل الآن رابط حساب فيسبوك الخاص بك:"
-      
-    # ==========================
-# استقبال رابط فيسبوك
-# ==========================
-
-async def text_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user_id = update.effective_user.id
-
-
-    if context.user_data.get("waiting_facebook"):
-
-        link = update.message.text
-
-
-        cursor.execute(
-            """
-            UPDATE users
-            SET facebook=?
-            WHERE id=?
-            """,
-
-            (
-                link,
-                user_id
-            )
-        )
-
-
-        db.commit()
-
-
-        context.user_data[
-            "waiting_facebook"
-        ] = False
-
-
-
-        await update.message.reply_text(
-            "✅ تم حفظ حسابك بنجاح\n"
-            "يمكنك الآن استخدام البوت."
-        )
-
+    bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
+
+# Handle Facebook link input
+@bot.message_handler(func=lambda message: True)
+def handle_fb_link(message):
+    user_id = str(message.chat.id)
+    if user_id not in users_data or users_data[user_id].get("fb_link"):
+        return  # Already has link or not started
+    
+    fb_link = message.text.strip()
+    if "facebook.com" not in fb_link.lower():
+        bot.send_message(message.chat.id, "Veuillez envoyer un lien Facebook valide.")
         return
-
-
-
-    await update.message.reply_text(
-        "استخدم / لرؤية الأوامر"
+    
+    users_data[user_id]["fb_link"] = fb_link
+    save_data(users_data)
+    
+    markup = types.InlineKeyboardMarkup()
+    continue_btn = types.InlineKeyboardButton("Continue", callback_data="profile_created")
+    markup.add(continue_btn)
+    
+    bot.send_message(
+        message.chat.id,
+        f"تم انشاء ملفك الشخصي\n\nPoints: 0",
+        reply_markup=markup
     )
 
-
-
-
-# ==========================
-# الملف الشخصي
-# ==========================
-
-async def profile(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user_id = update.effective_user.id
-
-
-    create_user(
-        user_id,
-        update.effective_user.username
-    )
-
-
-    cursor.execute(
-        """
-        SELECT username, facebook, points
-        FROM users
-        WHERE id=?
-        """,
-
-        (user_id,)
-    )
-
-
-    data = cursor.fetchone()
-
-
-
-    await update.message.reply_text(
-
-        "👤 حسابك\n\n"
-
-        f"📘 فيسبوك:\n{data[1] or 'غير مضاف'}\n\n"
-
-        f"⭐ النقاط: {data[2]}"
-
-    )
-
-
-
-
-
-# ==========================
-# عرض الحسابات
-# ==========================
-
-async def accounts(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    cursor.execute(
-        """
-        SELECT username, facebook, points
-        FROM users
-        WHERE facebook != ''
-        """
-    )
-
-
-    rows = cursor.fetchall()
-
-
-
-    if not rows:
-
-        await update.message.reply_text(
-            "لا توجد حسابات مضافة حاليا"
+# Callback handler
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    user_id = str(call.message.chat.id)
+    data = call.data
+    
+    if data == "continue":
+        bot.edit_message_text(
+            "الرجاء إرسال رابط حسابك على فيسبوك:",
+            call.message.chat.id,
+            call.message.message_id
         )
-
-        return
-
-
-
-    text = "📘 الحسابات:\n\n"
-
-
-    for row in rows:
-
-        text += (
-
-            f"👤 {row[0]}\n"
-
-            f"⭐ {row[2]} نقطة\n"
-
-            f"{row[1]}\n\n"
-
+    
+    elif data == "profile_created":
+        markup = types.InlineKeyboardMarkup()
+        points_btn = types.InlineKeyboardButton("All Points", callback_data="all_points")
+        markup.add(points_btn)
+        
+        bot.edit_message_text(
+            "تم انشاء ملفك الشخصي\n\nPoints: 0",
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=markup
         )
-
-
-
-    await update.message.reply_text(text)
-
-
-
-
-
-# ==========================
-# المتصدرون
-# ==========================
-
-async def top(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    cursor.execute(
-        """
-        SELECT username, points
-        FROM users
-        ORDER BY points DESC
-        LIMIT 10
-        """
-    )
-
-
-    rows = cursor.fetchall()
-
-
-    text = "🏆 المتصدرون:\n\n"
-
-
-
-    for index, row in enumerate(rows, 1):
-
-        text += (
-
-            f"{index}- {row[0]}\n"
-
-            f"⭐ {row[1]} نقطة\n\n"
-
+    
+    elif data == "all_points":
+        if user_id not in users_data:
+            bot.answer_callback_query(call.id, "Error: Profile not found.")
+            return
+        
+        markup = types.InlineKeyboardMarkup()
+        follow_btn = types.InlineKeyboardButton("Follow Developer", url=DEV_PROFILE)
+        done_btn = types.InlineKeyboardButton("Done", callback_data="done_follow")
+        markup.row(follow_btn)
+        markup.row(done_btn)
+        
+        bot.edit_message_text(
+            f"المطور: {DEV_PROFILE}\n\n"
+            "يرجى متابعة الحساب أعلاه للحصول على النقاط.",
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=markup
         )
+    
+    elif data == "done_follow":
+        if user_id not in users_data:
+            bot.answer_callback_query(call.id, "Error.")
+            return
+        
+        user = users_data[user_id]
+        if not user.get("followed_dev"):
+            user["points"] = user.get("points", 0) + 1
+            user["followed_dev"] = True
+            save_data(users_data)
+            
+            bot.edit_message_text(
+                f"مبروك! حصلت على 1 نقطة.\n\n"
+                f"Points: {user['points']}\n\n"
+                "حسابك محفوظ في قاعدة البيانات وسيبقى دائماً.",
+                call.message.chat.id,
+                call.message.message_id
+            )
+        else:
+            bot.edit_message_text(
+                f"Points: {user.get('points', 0)}\n\n"
+                "لقد حصلت على نقاطك بالفعل.",
+                call.message.chat.id,
+                call.message.message_id
+            )
+    
+    bot.answer_callback_query(call.id)
 
-
-
-    await update.message.reply_text(text)
-
-
-
-
-
-# ==========================
-# معلومات البوت
-# ==========================
-
-async def info(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM users"
+# Help command
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    bot.send_message(
+        message.chat.id,
+        "Bot de support Facebook.\n\n"
+        "Utilisez /start pour commencer.\n"
+        "Tout est sauvegardé de manière persistante."
     )
-
-    count = cursor.fetchone()[0]
-
-
-    await update.message.reply_text(
-
-        "🤖 البوت يعمل\n\n"
-
-        f"👥 عدد المستخدمين: {count}"
-
-    )
-
-
-
-
-
-# ==========================
-# تسجيل الأوامر
-# ==========================
-
-telegram_app.add_handler(
-    CommandHandler(
-        "start",
-        start
-    )
-)
-
-
-telegram_app.add_handler(
-    CommandHandler(
-        "addfacebook",
-        add_facebook
-    )
-)
-
-
-telegram_app.add_handler(
-    CommandHandler(
-        "profile",
-        profile
-    )
-)
-
-
-telegram_app.add_handler(
-    CommandHandler(
-        "accounts",
-        accounts
-    )
-)
-
-
-telegram_app.add_handler(
-    CommandHandler(
-        "top",
-        top
-    )
-)
-
-
-telegram_app.add_handler(
-    CommandHandler(
-        "info",
-        info
-    )
-)
-
-
-
-telegram_app.add_handler(
-    MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        text_handler
-    )
-)
-
-
-
-
-
-# ==========================
-# Webhook
-# ==========================
-
-@app.route("/")
-def home():
-
-    return "Telegram Bot Running"
-
-
-
-
-@app.route(
-    f"/{TOKEN}",
-    methods=["POST"]
-)
-
-def webhook():
-
-    update = Update.de_json(
-        request.get_json(force=True),
-        telegram_app.bot
-    )
-
-
-    asyncio.run(
-        telegram_app.process_update(update)
-    )
-
-
-    return "OK"
-
-
-
-
-
-# ==========================
-# تشغيل البوت
-# ==========================
-
-async def setup_bot():
-
-    await telegram_app.initialize()
-
-
-    await set_commands()
-
-
-
-    await telegram_app.bot.set_webhook(
-
-        f"{WEBHOOK_URL}/{TOKEN}"
-
-    )
-
-
-    await telegram_app.start()
-
-
-
-    print(
-        "🤖 Bot started successfully"
-    )
-
-
-
-
 
 if __name__ == "__main__":
-
-
-    asyncio.run(
-        setup_bot()
-    )
-
-
-    app.run(
-
-        host="0.0.0.0",
-
-        port=int(
-            os.environ.get(
-                "PORT",
-                10000
-            )
-        )
-
-))
+    print("Bot is running...")
+    bot.infinity_polling()
